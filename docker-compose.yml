@@ -1,0 +1,98 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  kafka-producer:
+    build: ./app/producer
+    container_name: kafka-producer
+    depends_on:
+      - kafka
+    restart: always
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop2.7.4-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=test
+    ports:
+      - "9870:9870"
+      - "50070:50070"
+    volumes:
+      - hdfs-namenode-data:/hadoop/dfs/name
+      - ./data:/app/data  # Monter un répertoire local (./data) vers /app/data dans le conteneur
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop2.7.4-java8
+    container_name: datanode
+    depends_on:
+      - namenode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    ports:
+      - "9864:9864"
+
+  spark-master:
+    build: ./custom-spark
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./app:/app
+
+  spark-worker:
+    build: ./custom-spark
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+
+  spark-app:
+    build: ./app/consumer
+    container_name: spark-app
+    depends_on:
+      - kafka
+      - spark-master
+      - namenode
+
+  space-api:
+    build: ./space-api
+    ports:
+      - "5000:5000"
+    networks:
+      - space-network
+
+  space-objects:
+    build: ./space-objects
+    ports:
+      - "3000:3000"
+    depends_on:
+      - space-api
+    networks:
+      - space-network
+
+networks:
+  space-network:
+    driver: bridge
+volumes:
+  hdfs-namenode-data:
